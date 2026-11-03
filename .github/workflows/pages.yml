@@ -32,6 +32,8 @@ jobs:
           unzip -qo /tmp/ai-overlay-v2.zip -d /tmp/ziwei-source/ziwei-doushu-optimized
           base64 -d "$GITHUB_WORKSPACE/ai-overlay-v3.b64" > /tmp/ai-overlay-v3.zip
           unzip -qo /tmp/ai-overlay-v3.zip -d /tmp/ziwei-source/ziwei-doushu-optimized
+          base64 -d "$GITHUB_WORKSPACE/ai-overlay-v4.b64" > /tmp/ai-overlay-v4.zip
+          unzip -qo /tmp/ai-overlay-v4.zip -d /tmp/ziwei-source/ziwei-doushu-optimized
           printf '\nexport const dynamic = "force-static";\n' >> app/robots.ts
           printf '\nexport const dynamic = "force-static";\n' >> app/sitemap.ts
           git init -q
