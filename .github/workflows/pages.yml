@@ -28,14 +28,10 @@ jobs:
         run: |
           unzip -q ziwei-doushu-optimized.zip -d /tmp/ziwei-source
           cd /tmp/ziwei-source/ziwei-doushu-optimized
-          base64 -d "$GITHUB_WORKSPACE/ai-overlay-v2.b64" > /tmp/ai-overlay-v2.zip
-          unzip -qo /tmp/ai-overlay-v2.zip -d /tmp/ziwei-source/ziwei-doushu-optimized
-          base64 -d "$GITHUB_WORKSPACE/ai-overlay-v3.b64" > /tmp/ai-overlay-v3.zip
-          unzip -qo /tmp/ai-overlay-v3.zip -d /tmp/ziwei-source/ziwei-doushu-optimized
-          base64 -d "$GITHUB_WORKSPACE/ai-overlay-v4.b64" > /tmp/ai-overlay-v4.zip
-          unzip -qo /tmp/ai-overlay-v4.zip -d /tmp/ziwei-source/ziwei-doushu-optimized
-          base64 -d "$GITHUB_WORKSPACE/ai-overlay-v5.b64" > /tmp/ai-overlay-v5.zip
-          unzip -qo /tmp/ai-overlay-v5.zip -d /tmp/ziwei-source/ziwei-doushu-optimized
+          for overlay in ai-overlay-v2 ai-overlay-v3 ai-overlay-v4 ai-overlay-v5 ai-overlay-v6; do
+            base64 -d "$GITHUB_WORKSPACE/$overlay.b64" > "/tmp/$overlay.zip"
+            unzip -qo "/tmp/$overlay.zip" -d /tmp/ziwei-source/ziwei-doushu-optimized
+          done
           printf '\nexport const dynamic = "force-static";\n' >> app/robots.ts
           printf '\nexport const dynamic = "force-static";\n' >> app/sitemap.ts
           git init -q
