@@ -1,0 +1,493 @@
+diff --git a/.patch-base/.env.example b/.patch-target/.env.example
+index 184aa7f..c555f26 100644
+--- a/.patch-base/.env.example
++++ b/.patch-target/.env.example
+@@ -1,11 +1,15 @@
+ # 复制为 .env.local 后填入实际值
+ 
+ # ─── AI 推理（OpenAI 兼容协议，任选一家）───
+-# 注意：开源版不含 /api/interpret 等后端接口，下面这组配置只在你自己实现了接口后才会用到；
+-# 只想排盘、看命盘的话不用填。
++# 开源版不含服务端 /api/interpret。静态部署时可在页面上的“AI 设置”里
++# 临时填写自己的 OpenAI 兼容接口，密钥只保存在当前浏览器会话中。
+ AI_PROVIDER=deepseek
+ DEEPSEEK_API_KEY=your-deepseek-api-key
+ 
++# 静态页面 AI 设置表单的默认项（不要在这里放 API Key）
++NEXT_PUBLIC_AI_BASE_URL=https://api.deepseek.com
++NEXT_PUBLIC_AI_MODEL=deepseek-chat
++
+ # ─── 或用其他 OpenAI 兼容模型 ───
+ # AI_PROVIDER=mimo
+ # MIMO_API_KEY=your-api-key
+diff --git a/.patch-base/README.md b/.patch-target/README.md
+index 6dceb75..de08662 100644
+--- a/.patch-base/README.md
++++ b/.patch-target/README.md
+@@ -296,7 +296,7 @@ npm test            # 排盘引擎回归（768 盘 × 紫微铁律、夏令时
+ 
+ 每次 push 与 PR 都会在 GitHub Actions 上跑同一套（见 [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)）。
+ 
+-> **注意：开源版不含后端 API 路由。**排盘、命盘展示、合盘起盘都在浏览器里用本仓库的引擎完成，**不需要任何 API Key**。AI 解读（`/api/interpret`）和合盘 AI 分析（`/api/heming`）需要你自己实现接口；没实现之前，这两处会直接提示「开源版不含该接口」，配置 API Key 也不会变成可用（#30 就是这个原因）。
++> **注意：开源版不含后端 API 路由。**排盘、命盘展示、合盘起盘都在浏览器里用本仓库的引擎完成，**不需要任何 API Key**。静态部署时可在命盘页的「AI 设置」中填写自己的 OpenAI 兼容接口、模型和密钥；密钥只存于当前标签页的 `sessionStorage`，不会写入仓库。若部署了自己的 `/api/interpret`，页面会优先使用服务端接口。合盘 AI 分析仍需自行实现 `/api/heming`。
+ 
+ ---
+ 
+diff --git a/.patch-base/components/InsightPanel.tsx b/.patch-target/components/InsightPanel.tsx
+index aadf069..c058909 100644
+--- a/.patch-base/components/InsightPanel.tsx
++++ b/.patch-target/components/InsightPanel.tsx
+@@ -2,6 +2,15 @@
+ import { useState, useRef, useEffect } from 'react';
+ import { motion, AnimatePresence } from 'framer-motion';
+ import type { ZiweiChart, Palace } from '@/lib/ziwei/types';
++import {
++  clearBrowserAIConfig,
++  consumeInterpretationStream,
++  defaultBrowserAIConfig,
++  loadBrowserAIConfig,
++  saveBrowserAIConfig,
++  streamBrowserAIChat,
++  type BrowserAIConfig,
++} from '@/lib/ai/browser-client';
+ import type { TimeView } from './TimeNav';
+ 
+ interface Message {
+@@ -187,9 +196,14 @@ export default function InsightPanel({ chart, selectedPalace, selectedSiHua }: I
+   const [input, setInput] = useState('');
+   const [loading, setLoading] = useState(false);
+   const [activeTopic, setActiveTopic] = useState<string>('overview');
++  const [aiConfig, setAiConfig] = useState<BrowserAIConfig>(() => defaultBrowserAIConfig());
++  const [configOpen, setConfigOpen] = useState(false);
++  const [configError, setConfigError] = useState('');
+   const messagesRef = useRef<Message[]>([]); // always-current copy for closures
+   const loadingRef = useRef(false);
+   const autoLoaded = useRef(false);
++  const aiConfigRef = useRef<BrowserAIConfig>(aiConfig);
++  const pendingPrompt = useRef<string | null>(null);
+   const lastPalaceBranch = useRef<number | undefined>(undefined);
+   const lastSiHuaKey = useRef<string | undefined>(undefined);
+   const scrollRef = useRef<HTMLDivElement>(null);
+@@ -197,6 +211,7 @@ export default function InsightPanel({ chart, selectedPalace, selectedSiHua }: I
+   // Keep refs in sync
+   useEffect(() => { messagesRef.current = messages; }, [messages]);
+   useEffect(() => { loadingRef.current = loading; }, [loading]);
++  useEffect(() => { aiConfigRef.current = aiConfig; }, [aiConfig]);
+ 
+   // Auto-scroll
+   useEffect(() => {
+@@ -205,11 +220,21 @@ export default function InsightPanel({ chart, selectedPalace, selectedSiHua }: I
+     }
+   }, [messages]);
+ 
+-  // Auto-generate 命格总览 on mount
++  // Load the temporary browser-only AI configuration and generate the first
++  // overview only when credentials are already available.
+   useEffect(() => {
+     if (autoLoaded.current) return;
+     autoLoaded.current = true;
+-    sendMessage(TOPIC_PROMPTS.overview, true);
++    const loaded = loadBrowserAIConfig();
++    aiConfigRef.current = loaded;
++    setAiConfig(loaded);
++
++    if (loaded.apiKey) {
++      sendMessage(TOPIC_PROMPTS.overview, true);
++    } else {
++      pendingPrompt.current = TOPIC_PROMPTS.overview;
++      setConfigOpen(true);
++    }
+   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+ 
+   // Inject palace analysis when palace selected
+@@ -276,43 +301,54 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，
+ 
+   const streamResponse = async (apiMessages: { role: 'user' | 'assistant'; content: string }[]) => {
+     try {
+-      const res = await fetch('/api/interpret', {
+-        method: 'POST',
+-        headers: { 'Content-Type': 'application/json' },
+-        body: JSON.stringify({ chart, messages: apiMessages }),
+-      });
+-      if (res.status === 404) throw new Error('api-missing');
+-      if (!res.ok) throw new Error('请求失败');
+-      if (!res.body) throw new Error('无响应流');
+-
+-      const reader = res.body.getReader();
+-      const decoder = new TextDecoder();
+       let assistantText = '';
+ 
+       setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+ 
+-      while (true) {
+-        const { done, value } = await reader.read();
+-        if (done) break;
+-        const chunk = decoder.decode(value, { stream: true });
+-        for (const line of chunk.split('\n')) {
+-          if (!line.startsWith('data: ')) continue;
+-          const data = line.slice(6);
+-          if (data === '[DONE]') break;
+-          try {
+-            const delta = JSON.parse(data).delta?.text ?? '';
+-            assistantText += delta;
+-            setMessages(prev => {
+-              const updated = [...prev];
+-              updated[updated.length - 1] = { role: 'assistant', content: assistantText };
+-              return updated;
+-            });
+-          } catch { /* skip */ }
++      const applyDelta = (delta: string) => {
++        assistantText += delta;
++        setMessages(prev => {
++          const updated = [...prev];
++          updated[updated.length - 1] = { role: 'assistant', content: assistantText };
++          return updated;
++        });
++      };
++
++      let useBrowserClient = false;
++      try {
++        const res = await fetch('/api/interpret', {
++          method: 'POST',
++          headers: { 'Content-Type': 'application/json' },
++          body: JSON.stringify({ chart, messages: apiMessages }),
++        });
++        const contentType = res.headers.get('content-type') ?? '';
++        if (res.ok && contentType.includes('text/event-stream')) {
++          await consumeInterpretationStream(res, applyDelta);
++        } else {
++          useBrowserClient = true;
++        }
++      } catch {
++        useBrowserClient = true;
++      }
++
++      if (useBrowserClient) {
++        const config = aiConfigRef.current;
++        if (!config.apiKey) {
++          setConfigOpen(true);
++          throw new Error('ai-config-required');
+         }
++        await streamBrowserAIChat(chart, apiMessages, config, applyDelta);
+       }
+     } catch (e) {
+-      const missing = e instanceof Error && e.message === 'api-missing';
+-      setMessages(prev => [...prev, { role: 'assistant', content: missing ? '开源版不含 AI 解读接口（/api/interpret），需要你自己实现后才能用，详见 README「快速开始」。排盘本身不需要任何 API Key。' : '解读失败，请稍后重试。' }]);
++      if (e instanceof Error && e.message === 'ai-config-required') {
++        setConfigError('请先配置你的 AI 接口和 API Key。密钥只保存在当前浏览器会话中。');
++      } else {
++        const detail = e instanceof Error ? e.message : '未知错误';
++        setMessages(prev => [...prev, {
++          role: 'assistant',
++          content: `AI 解读失败：${detail}\n\n请检查接口地址、模型名称、API Key 与服务的跨域设置。`,
++        }]);
++      }
+     } finally {
+       setLoading(false);
+       loadingRef.current = false;
+@@ -321,6 +357,12 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，
+ 
+   const sendMessage = (text: string, hidden = false) => {
+     if (!text.trim() || loadingRef.current) return;
++    if (!aiConfigRef.current.apiKey) {
++      pendingPrompt.current = text;
++      setConfigOpen(true);
++      setConfigError('请先配置 AI 接口。密钥只保存在当前浏览器会话中。');
++      return;
++    }
+     loadingRef.current = true;
+     setLoading(true);
+ 
+@@ -346,9 +388,109 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，
+     sendMessage(input);
+   };
+ 
++  const handleSaveConfig = () => {
++    try {
++      const saved = saveBrowserAIConfig(aiConfig);
++      aiConfigRef.current = saved;
++      setAiConfig(saved);
++      setConfigError('');
++      setConfigOpen(false);
++      const prompt = pendingPrompt.current;
++      pendingPrompt.current = null;
++      if (prompt) sendMessage(prompt, true);
++    } catch (error) {
++      setConfigError(error instanceof Error ? error.message : '配置无效');
++    }
++  };
++
++  const handleClearConfig = () => {
++    const cleared = clearBrowserAIConfig();
++    aiConfigRef.current = cleared;
++    setAiConfig(cleared);
++    setConfigError('配置已清除');
++  };
++
+   return (
+     <div className="flex flex-col h-full rounded-xl overflow-hidden card-glass">
+ 
++      <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid var(--t-border)' }}>
++        <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--t-faint)' }}>
++          <span style={{ color: 'var(--t-gold)' }}>✦</span>
++          AI 解读
++          <span style={{ color: aiConfig.apiKey ? '#4ade80' : 'var(--t-faint)' }}>
++            {aiConfig.apiKey ? '已配置' : '未配置'}
++          </span>
++        </div>
++        <button
++          type="button"
++          onClick={() => setConfigOpen(v => !v)}
++          className="rounded-md px-2 py-1 text-[10px]"
++          style={{ border: '1px solid var(--t-border)', color: 'var(--t-gold)' }}
++        >
++          AI 设置
++        </button>
++      </div>
++
++      {configOpen && (
++        <div className="space-y-2 px-3 py-3" style={{ borderBottom: '1px solid var(--t-border)' }}>
++          <p className="text-[10px] leading-relaxed" style={{ color: 'var(--t-faint)' }}>
++            支持 OpenAI 兼容接口。密钥仅保存在当前标签页会话中，不会上传到本网站或写入仓库。
++          </p>
++          <input
++            type="url"
++            value={aiConfig.baseUrl}
++            onChange={e => setAiConfig(prev => ({ ...prev, baseUrl: e.target.value }))}
++            placeholder="API 地址，例如 https://api.deepseek.com"
++            className="w-full rounded-lg px-2.5 py-2 text-[10px] outline-none"
++            style={{ background: 'var(--t-card)', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}
++          />
++          <input
++            type="text"
++            value={aiConfig.model}
++            onChange={e => setAiConfig(prev => ({ ...prev, model: e.target.value }))}
++            placeholder="模型名称，例如 deepseek-chat"
++            className="w-full rounded-lg px-2.5 py-2 text-[10px] outline-none"
++            style={{ background: 'var(--t-card)', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}
++          />
++          <input
++            type="password"
++            autoComplete="off"
++            value={aiConfig.apiKey}
++            onChange={e => setAiConfig(prev => ({ ...prev, apiKey: e.target.value }))}
++            placeholder="API Key"
++            className="w-full rounded-lg px-2.5 py-2 text-[10px] outline-none"
++            style={{ background: 'var(--t-card)', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}
++          />
++          {configError && <div className="text-[10px]" style={{ color: '#f87171' }}>{configError}</div>}
++          <div className="flex flex-wrap gap-2">
++            <button
++              type="button"
++              onClick={handleSaveConfig}
++              className="rounded-md px-3 py-1.5 text-[10px]"
++              style={{ background: 'rgba(212,168,67,0.15)', border: '1px solid rgba(212,168,67,0.25)', color: 'var(--t-gold)' }}
++            >
++              保存并解读
++            </button>
++            <button
++              type="button"
++              onClick={() => setConfigOpen(false)}
++              className="rounded-md px-3 py-1.5 text-[10px]"
++              style={{ border: '1px solid var(--t-border)', color: 'var(--t-faint)' }}
++            >
++              取消
++            </button>
++            <button
++              type="button"
++              onClick={handleClearConfig}
++              className="rounded-md px-3 py-1.5 text-[10px]"
++              style={{ border: '1px solid var(--t-border)', color: 'var(--t-faint)' }}
++            >
++              清除配置
++            </button>
++          </div>
++        </div>
++      )}
++
+       {/* ── Topic buttons ── */}
+       <div className="flex-shrink-0 px-2 pt-2.5 pb-2" style={{ borderBottom: '1px solid var(--t-border)' }}>
+         <div className="grid grid-cols-6 gap-1">
+diff --git a/.patch-target/lib/ai/browser-client.ts b/.patch-target/lib/ai/browser-client.ts
+new file mode 100644
+index 0000000..d1bd81c
+--- /dev/null
++++ b/.patch-target/lib/ai/browser-client.ts
+@@ -0,0 +1,177 @@
++import type { ZiweiChart } from '@/lib/ziwei/types';
++
++export interface BrowserAIConfig {
++  baseUrl: string;
++  model: string;
++  apiKey: string;
++}
++
++const STORAGE_KEY = 'ziwei-browser-ai-v1';
++
++export function defaultBrowserAIConfig(): BrowserAIConfig {
++  return {
++    baseUrl: process.env.NEXT_PUBLIC_AI_BASE_URL?.trim() || 'https://api.deepseek.com',
++    model: process.env.NEXT_PUBLIC_AI_MODEL?.trim() || 'deepseek-chat',
++    apiKey: '',
++  };
++}
++
++export function loadBrowserAIConfig(): BrowserAIConfig {
++  const fallback = defaultBrowserAIConfig();
++  if (typeof window === 'undefined') return fallback;
++
++  try {
++    const saved = window.sessionStorage.getItem(STORAGE_KEY);
++    if (!saved) return fallback;
++    const parsed = JSON.parse(saved) as Partial<BrowserAIConfig>;
++    return {
++      baseUrl: typeof parsed.baseUrl === 'string' && parsed.baseUrl.trim()
++        ? parsed.baseUrl.trim()
++        : fallback.baseUrl,
++      model: typeof parsed.model === 'string' && parsed.model.trim()
++        ? parsed.model.trim()
++        : fallback.model,
++      apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey.trim() : '',
++    };
++  } catch {
++    return fallback;
++  }
++}
++
++export function saveBrowserAIConfig(config: BrowserAIConfig): BrowserAIConfig {
++  const normalized = {
++    baseUrl: config.baseUrl.trim().replace(/\/+$/, ''),
++    model: config.model.trim(),
++    apiKey: config.apiKey.trim(),
++  };
++
++  if (!/^https?:\/\//i.test(normalized.baseUrl)) {
++    throw new Error('API 地址必须以 http:// 或 https:// 开头');
++  }
++  if (!normalized.model) throw new Error('请填写模型名称');
++  if (!normalized.apiKey) throw new Error('请填写 API Key');
++
++  window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
++  return normalized;
++}
++
++export function clearBrowserAIConfig(): BrowserAIConfig {
++  window.sessionStorage.removeItem(STORAGE_KEY);
++  return defaultBrowserAIConfig();
++}
++
++function completionEndpoint(baseUrl: string): string {
++  const base = baseUrl.replace(/\/+$/, '');
++  return base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
++}
++
++function buildChartContext(chart: ZiweiChart): string {
++  return JSON.stringify({
++    birthInfo: chart.birthInfo,
++    lunarInfo: chart.lunarInfo,
++    fiveElements: chart.wuxingJuName,
++    mingGongBranch: chart.mingGongBranch,
++    shenGongBranch: chart.shenGongBranch,
++    currentAge: chart.currentAge,
++    daXians: chart.daXians,
++    palaces: chart.palaces.map(palace => ({
++      name: palace.name,
++      branch: palace.branch,
++      stem: palace.stem,
++      isEmpty: palace.isEmpty,
++      borrowedFromName: palace.borrowedFromName,
++      stars: palace.stars.map(star => ({
++        name: star.name,
++        type: star.type,
++        brightness: star.brightnessRaw ?? star.brightness,
++        siHua: star.siHua,
++      })),
++    })),
++  });
++}
++
++/**
++ * Parse either the project's server API format (`delta.text`) or the standard
++ * OpenAI-compatible streaming format (`choices[0].delta.content`).
++ */
++export async function consumeInterpretationStream(
++  response: Response,
++  onDelta: (delta: string) => void,
++): Promise<void> {
++  if (!response.body) throw new Error('AI 服务没有返回响应流');
++
++  const reader = response.body.getReader();
++  const decoder = new TextDecoder();
++  let buffer = '';
++
++  const consumeEvent = (event: string) => {
++    for (const line of event.split(/\r?\n/)) {
++      if (!line.startsWith('data:')) continue;
++      const data = line.slice(5).trim();
++      if (!data || data === '[DONE]') continue;
++      try {
++        const parsed = JSON.parse(data);
++        const delta = parsed.delta?.text
++          ?? parsed.choices?.[0]?.delta?.content
++          ?? parsed.choices?.[0]?.message?.content
++          ?? '';
++        if (delta) onDelta(delta);
++      } catch {
++        // Ignore keep-alive and malformed partial events.
++      }
++    }
++  };
++
++  while (true) {
++    const { done, value } = await reader.read();
++    if (done) break;
++    buffer += decoder.decode(value, { stream: true });
++    const events = buffer.split(/\r?\n\r?\n/);
++    buffer = events.pop() ?? '';
++    for (const event of events) consumeEvent(event);
++  }
++  buffer += decoder.decode();
++  if (buffer.trim()) consumeEvent(buffer);
++}
++
++export async function streamBrowserAIChat(
++  chart: ZiweiChart,
++  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
++  config: BrowserAIConfig,
++  onDelta: (delta: string) => void,
++): Promise<void> {
++  const response = await fetch(completionEndpoint(config.baseUrl), {
++    method: 'POST',
++    headers: {
++      'Content-Type': 'application/json',
++      Authorization: `Bearer ${config.apiKey}`,
++    },
++    body: JSON.stringify({
++      model: config.model,
++      stream: true,
++      temperature: 0.5,
++      messages: [
++        {
++          role: 'system',
++          content: `你是严谨的紫微斗数研究助手。请只依据下方命盘数据作答：
++1. 明确区分“命盘事实”“传统古籍观点”“倪海厦体系解释”和“现代行动建议”；
++2. 不虚构原文、页码、出处或预测精度；
++3. 不把命理判断写成医学诊断、法律意见、投资承诺；
++4. 结论要对应具体宫位、主星、亮度或四化证据；
++5. 使用简体中文，结构清晰，避免宿命论和恐吓式表达。
++
++命盘数据：
++${buildChartContext(chart)}`,
++        },
++        ...messages,
++      ],
++    }),
++  });
++
++  if (!response.ok) {
++    const detail = (await response.text()).slice(0, 300);
++    throw new Error(`AI 接口返回 ${response.status}${detail ? `：${detail}` : ''}`);
++  }
++
++  await consumeInterpretationStream(response, onDelta);
++}
