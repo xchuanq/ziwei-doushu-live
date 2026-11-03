@@ -28,6 +28,8 @@ jobs:
         run: |
           unzip -q ziwei-doushu-optimized.zip -d /tmp/ziwei-source
           cd /tmp/ziwei-source/ziwei-doushu-optimized
+          git init -q
+          git add -A
           npm ci --no-audit --no-fund
           npm run typecheck
           npm test
