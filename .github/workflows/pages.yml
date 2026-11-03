@@ -29,6 +29,8 @@ jobs:
           unzip -q ziwei-doushu-optimized.zip -d /tmp/ziwei-source
           cd /tmp/ziwei-source/ziwei-doushu-optimized
           rm -rf "app/knowledge/[star]/[topic]"
+          printf '\nexport const dynamic = \"force-static\";\n' >> app/robots.ts
+          printf '\nexport const dynamic = \"force-static\";\n' >> app/sitemap.ts
           git init -q
           git add -A
           npm ci --no-audit --no-fund
