@@ -24,10 +24,11 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Unpack, test, and build
+      - name: Unpack, patch, test, and build
         run: |
           unzip -q ziwei-doushu-optimized.zip -d /tmp/ziwei-source
           cd /tmp/ziwei-source/ziwei-doushu-optimized
+          git apply -p2 "$GITHUB_WORKSPACE/ai.patch"
           rm -rf "app/knowledge/[star]/[topic]"
           printf '\nexport const dynamic = \"force-static\";\n' >> app/robots.ts
           printf '\nexport const dynamic = \"force-static\";\n' >> app/sitemap.ts
