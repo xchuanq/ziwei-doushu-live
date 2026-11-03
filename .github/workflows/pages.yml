@@ -28,6 +28,7 @@ jobs:
         run: |
           unzip -q ziwei-doushu-optimized.zip -d /tmp/ziwei-source
           cd /tmp/ziwei-source/ziwei-doushu-optimized
+          rm -rf "app/knowledge/[star]/[topic]"
           git init -q
           git add -A
           npm ci --no-audit --no-fund
