@@ -1,0 +1,551 @@
+warning: in the working copy of 'DEPLOYMENT.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/privacy/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/terms/page.tsx', LF will be replaced by CRLF the next time Git touches it
+diff --git a/.github/ISSUE_TEMPLATE/2-bug-report.yml b/.github/ISSUE_TEMPLATE/2-bug-report.yml
+index 3043a30..97e890a 100644
+--- a/.github/ISSUE_TEMPLATE/2-bug-report.yml
++++ b/.github/ISSUE_TEMPLATE/2-bug-report.yml
+@@ -5,7 +5,7 @@ body:
+   - type: markdown
+     attributes:
+       value: |
+-        先确认：开源版**不含**任何 `/api/*` 后端接口（AI 解读、合盘分析），这些功能出现 404 是预期行为，需要你自己实现，见 README「快速开始」。排盘本身不需要 API Key。
++        先确认：开源版**不含** `/api/interpret` 和 `/api/heming` 后端接口。命盘页的 AI 可在「AI 设置」中直连 OpenAI 兼容服务，合盘 AI 仍需自行实现。排盘本身不需要 API Key，详见 README「快速开始」。
+   - type: textarea
+     id: steps
+     attributes:
+diff --git a/DEPLOYMENT.md b/DEPLOYMENT.md
+index b208227..32cca45 100644
+--- a/DEPLOYMENT.md
++++ b/DEPLOYMENT.md
+@@ -28,8 +28,10 @@ https://<owner>.github.io/<repository>/
+ NEXT_PUBLIC_SITE_URL=https://your-domain.example
+ ```
+ 
+-开源版不包含 `/api/interpret` 和 `/api/heming`，所以不配置 AI API Key 也可以正常排盘；
+-相关按钮会显示“开源版不含该接口”。
++开源版不包含 `/api/interpret` 和 `/api/heming`，所以不配置 AI API Key 也可以正常排盘。
++命盘页会优先尝试同源 `/api/interpret`；静态部署没有该接口时，可在页面「AI 设置」
++中临时填写自己的 OpenAI 兼容地址、模型和密钥。密钥只保存在当前标签页的
++`sessionStorage`。合盘 AI 分析仍需要自行实现 `/api/heming`。
+ 
+ ## 普通 Node.js 主机
+ 
+diff --git a/app/chart/page.tsx b/app/chart/page.tsx
+index d409256..7622c09 100644
+--- a/app/chart/page.tsx
++++ b/app/chart/page.tsx
+@@ -13,9 +13,9 @@ import type { BirthInfo, ZiweiChart, Palace } from '@/lib/ziwei/types';
+  * 这是一个最小可运行示例：用本仓库的排盘引擎 generateChart() 配合基础 UI
+  * 组件，渲染一张完整紫微命盘 + 基础解读，并支持本命 / 大限 / 流年切换。
+  *
+- * 说明：线上商业版的完整交互界面（重设计的新 UI、AI 流式解读、合盘、分享
+- * 卡片等）不在开源范围内；但排盘内核——安星算法、四化、格局识别、古籍库——
+- * 完全开放（见 lib/ziwei/*），可自由二次开发出你自己的界面。
++ * 说明：线上商业版的完整交互界面、合盘、分享卡片等不在开源范围内；但排盘
++ * 内核——安星算法、四化、格局识别、古籍库——完全开放（见 lib/ziwei/*）。
++ * AI 解读支持服务端代理，静态部署时可临时使用自己的 OpenAI 兼容接口。
+  */
+ export default function ChartPage() {
+   const [chart, setChart] = useState<ZiweiChart | null>(null);
+diff --git a/app/knowledge/[star]/[topic]/page.tsx b/app/knowledge/[star]/[topic]/page.tsx
+index 3f20092..c1ebe53 100644
+--- a/app/knowledge/[star]/[topic]/page.tsx
++++ b/app/knowledge/[star]/[topic]/page.tsx
+@@ -38,8 +38,12 @@ export async function generateStaticParams() {
+   }
+ 
+   // 开源版的 STAR_DB 是空占位。纯静态导出不允许动态路由返回空数组，
+-  // 因此保留一个可访问的说明页；完整断语库接入后，真实路由会自动替换它。
+-  return [{ star: STAR_TO_SLUG[ALL_STARS[0]], topic: ALL_TOPICS[0] }];
++  // 因此为 14 个主星各生成一个可访问的说明页，避免知识库首页出现死链。
++  // 完整断语库接入后，真实路由会自动替换这些说明页。
++  return ALL_STARS.map(star => ({
++    star: STAR_TO_SLUG[star],
++    topic: ALL_TOPICS[0],
++  }));
+ }
+ 
+ export async function generateMetadata({ params }: { params: Promise<{ star: string; topic: string }> }) {
+@@ -82,10 +86,28 @@ export default async function KnowledgePage({ params }: { params: Promise<{ star
+     return (
+       <main style={{ maxWidth: 720, margin: '0 auto', padding: '80px 24px', textAlign: 'center' }}>
+         <h1 style={{ fontSize: 28, marginBottom: 16 }}>知识库内容未包含在开源快照中</h1>
++        <div style={{
++          margin: '20px auto 28px',
++          padding: '20px 24px',
++          border: '1px solid rgba(184,146,42,0.2)',
++          borderRadius: 12,
++          background: 'var(--bg-card)',
++        }}>
++          <div style={{ color: 'var(--ac)', fontSize: 20, fontWeight: 700, letterSpacing: '0.12em' }}>
++            {star}星
++          </div>
++          <p style={{ color: 'var(--tx-1)', lineHeight: 1.8, marginTop: 10 }}>
++            {STAR_BRIEF_SEO[star]}
++          </p>
++        </div>
+         <p style={{ color: 'var(--tx-2)', lineHeight: 1.8 }}>
+-          当前仓库保留了知识库页面结构和路由，但完整的星曜断语数据库属于线上版本。
++          当前开源版保留知识库页面结构、路由与主星导引，但 14 主星 × 13 主题的详细断语库属于线上版本。
++          排盘引擎、古籍原文与 AI 浏览器直连能力仍可正常使用。
+         </p>
+-        <Link href="/knowledge" style={{ color: 'var(--ac)' }}>← 返回知识库</Link>
++        <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginTop: 24 }}>
++          <Link href="/knowledge" style={{ color: 'var(--ac)' }}>← 返回知识库</Link>
++          <Link href="/chart" style={{ color: 'var(--ac)' }}>立即起盘 →</Link>
++        </div>
+       </main>
+     );
+   }
+diff --git a/app/knowledge/page.tsx b/app/knowledge/page.tsx
+index a665da7..0cfd017 100644
+--- a/app/knowledge/page.tsx
++++ b/app/knowledge/page.tsx
+@@ -4,7 +4,14 @@
+  */
+ 
+ import Link from 'next/link';
+-import { ALL_STARS, ALL_TOPICS, getKnowledge, STAR_BRIEF_SEO, STAR_TO_SLUG } from '@/lib/seo/knowledge';
++import {
++  ALL_STARS,
++  ALL_TOPICS,
++  getAllKnowledgeRoutes,
++  getKnowledge,
++  STAR_BRIEF_SEO,
++  STAR_TO_SLUG,
++} from '@/lib/seo/knowledge';
+ import { TOPIC_LABEL } from '@/lib/ziwei/db-analysis';
+ 
+ export const metadata = {
+@@ -15,6 +22,7 @@ export const metadata = {
+ 
+ export default function KnowledgeHomePage() {
+   const STAR_DESCRIPTIONS_QUICK = STAR_BRIEF_SEO;
++  const hasDetailedKnowledge = getAllKnowledgeRoutes().length > 0;
+ 
+   return (
+     <div style={{ background: 'var(--bg-page)', minHeight: '100vh' }}>
+@@ -43,13 +51,37 @@ export default function KnowledgeHomePage() {
+           紫微斗数知识库
+         </h1>
+         <p style={{ fontSize: '14px', color: 'var(--tx-2)', letterSpacing: '0.08em', maxWidth: '600px', margin: '0 auto', lineHeight: 1.7 }}>
+-          14 主星 × 13 宫位 = <strong style={{ color: 'var(--ac)' }}>{ALL_STARS.length * ALL_TOPICS.length}</strong> 项专题<br />
+-          基于倪海厦《天纪》体系编纂 · 含古籍引证
++          {hasDetailedKnowledge ? (
++            <>
++              14 主星 × 13 宫位 = <strong style={{ color: 'var(--ac)' }}>{ALL_STARS.length * ALL_TOPICS.length}</strong> 项专题<br />
++              基于倪海厦《天纪》体系编纂 · 含古籍引证
++            </>
++          ) : (
++            <>
++              14 主星知识导引 · 开源版页面框架<br />
++              详细断语库属于线上版本，当前可查看主星要点与起盘入口
++            </>
++          )}
+         </p>
+       </div>
+ 
+       {/* 14 主星卡片 */}
+       <div className="max-w-5xl mx-auto px-6 pb-20">
++        {!hasDetailedKnowledge && (
++          <div style={{
++            marginBottom: '24px',
++            padding: '14px 18px',
++            border: '1px solid rgba(184,146,42,0.22)',
++            borderRadius: '10px',
++            background: 'rgba(184,146,42,0.05)',
++            color: 'var(--tx-2)',
++            fontSize: '12px',
++            lineHeight: 1.75,
++            textAlign: 'center',
++          }}>
++            开源快照未包含完整的 14 主星 × 13 主题断语数据库；下方保留主星导引、页面结构与可访问说明页。
++          </div>
++        )}
+         <div style={{ fontSize: '11px', color: 'var(--tx-3)', letterSpacing: '0.3em', textAlign: 'center', marginBottom: '24px' }}>
+           十四主星
+         </div>
+diff --git a/app/page.tsx b/app/page.tsx
+index c6a50c1..2d37321 100644
+--- a/app/page.tsx
++++ b/app/page.tsx
+@@ -1,6 +1,7 @@
+ 'use client';
+ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+ import { useRouter } from 'next/navigation';
++import Link from 'next/link';
+ import { motion, useScroll, useTransform, useInView, AnimatePresence } from 'framer-motion';
+ import StarField from '@/components/StarField';
+ import { useTheme, type Theme } from '@/components/ThemeProvider';
+@@ -1101,30 +1102,36 @@ export default function HomePage() {
+             免费起盘
+           </motion.button>
+           <div className="mt-4 flex flex-wrap gap-3 justify-center">
+-            <motion.a
+-              href="/knowledge"
++            <motion.div
+               whileHover={{ scale: 1.02 }}
+-              className="text-xs tracking-[0.2em] inline-flex items-center gap-2 px-4 py-2 rounded-full"
+-              style={{
+-                color: c.goldSolid,
+-                border: `1px solid ${c.goldLine}`,
+-                background: 'transparent',
+-                textDecoration: 'none',
+-              }}>
+-              ✦ 紫微斗数知识库 →
+-            </motion.a>
+-            <motion.a
+-              href="/library"
++              style={{ display: 'inline-flex' }}>
++              <Link
++                href="/knowledge"
++                className="text-xs tracking-[0.2em] inline-flex items-center gap-2 px-4 py-2 rounded-full"
++                style={{
++                  color: c.goldSolid,
++                  border: `1px solid ${c.goldLine}`,
++                  background: 'transparent',
++                  textDecoration: 'none',
++                }}>
++                ✦ 紫微斗数知识库 →
++              </Link>
++            </motion.div>
++            <motion.div
+               whileHover={{ scale: 1.02 }}
+-              className="text-xs tracking-[0.2em] inline-flex items-center gap-2 px-4 py-2 rounded-full"
+-              style={{
+-                color: c.goldSolid,
+-                border: `1px solid ${c.goldLine}`,
+-                background: 'transparent',
+-                textDecoration: 'none',
+-              }}>
+-              📜 古籍原典库 →
+-            </motion.a>
++              style={{ display: 'inline-flex' }}>
++              <Link
++                href="/library"
++                className="text-xs tracking-[0.2em] inline-flex items-center gap-2 px-4 py-2 rounded-full"
++                style={{
++                  color: c.goldSolid,
++                  border: `1px solid ${c.goldLine}`,
++                  background: 'transparent',
++                  textDecoration: 'none',
++                }}>
++                📜 古籍原典库 →
++              </Link>
++            </motion.div>
+           </div>
+         </FadeIn>
+       </section>
+@@ -1180,9 +1187,9 @@ export default function HomePage() {
+             不构成任何医疗、投资、法律或重大决策建议。
+           </p>
+           <p className="text-[10px] tracking-wider" style={{ color: c.footerText }}>
+-            <a href="/terms" style={{ color: c.footerText, textDecoration: 'underline' }}>服务条款</a>
++            <Link href="/terms" style={{ color: c.footerText, textDecoration: 'underline' }}>使用条款</Link>
+             {' · '}
+-            <a href="/privacy" style={{ color: c.footerText, textDecoration: 'underline' }}>隐私政策</a>
++            <Link href="/privacy" style={{ color: c.footerText, textDecoration: 'underline' }}>隐私说明</Link>
+           </p>
+         </div>
+       </footer>
+diff --git a/app/privacy/page.tsx b/app/privacy/page.tsx
+index 219dfad..8e20b2b 100644
+--- a/app/privacy/page.tsx
++++ b/app/privacy/page.tsx
+@@ -1,69 +1,51 @@
+-export const metadata = { title: '隐私政策 · 紫微命盘', description: '紫微命盘隐私政策' };
++import Link from 'next/link';
++
++export const metadata = {
++  title: '隐私说明 · 紫微命盘开源版',
++  description: '紫微斗数开源排盘 Demo 的隐私说明',
++};
+ 
+ export default function PrivacyPage() {
+   return (
+     <>
+       <header style={{ position: 'sticky', top: 0, zIndex: 50, background: 'var(--bg-0)', borderBottom: '1px solid var(--bdr)', padding: '14px 24px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+-        <a href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--tx-3)', textDecoration: 'none' }}>
++        <Link href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--tx-3)', textDecoration: 'none' }}>
+           <span style={{ fontSize: '16px' }}>‹</span>
+           <span>返回首页</span>
+-        </a>
++        </Link>
+         <div style={{ width: '1px', height: '20px', background: 'var(--bdr-med)' }} />
+-        <span style={{ fontSize: '12px', color: 'var(--ac)', letterSpacing: '0.2em' }}>紫微命盘</span>
++        <span style={{ fontSize: '12px', color: 'var(--ac)', letterSpacing: '0.2em' }}>紫微命盘 · 开源版</span>
+       </header>
+       <main style={{ maxWidth: 800, margin: '0 auto', padding: '60px 24px 80px', color: 'var(--tx-1)', lineHeight: 1.8 }}>
+-        <h1 style={{ fontSize: 28, fontWeight: 600, marginBottom: 8 }}>隐私政策</h1>
+-        <p style={{ fontSize: 12, color: 'var(--tx-3)', marginBottom: 32 }}>最后更新：2026年4月</p>
+-
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>1. 我们收集的信息</h2>
+-      <p>为提供紫微命盘排盘与解读服务，我们可能收集以下信息：</p>
+-      <ul style={{ paddingLeft: 24 }}>
+-        <li><strong>命盘必要信息</strong>：姓名（选填）、出生公历年月日、出生时辰、性别、出生地经度</li>
+-        <li><strong>账号信息（注册后）</strong>：手机号（用于短信验证与会员服务）</li>
+-        <li><strong>交互信息</strong>：你在站内的点击、浏览、命盘历史记录</li>
+-        <li><strong>反馈信息</strong>：你对解读内容的"准 / 不准"打分与文字反馈</li>
+-        <li><strong>支付信息</strong>：购买会员或单项服务时通过第三方支付（支付宝 / 微信支付）处理，本平台不存储完整卡号或密码</li>
+-      </ul>
++        <h1 style={{ fontSize: 28, fontWeight: 600, marginBottom: 8 }}>隐私说明</h1>
++        <p style={{ fontSize: 12, color: 'var(--tx-3)', marginBottom: 32 }}>最后更新：2026年11月</p>
+ 
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>2. 我们如何使用信息</h2>
+-      <ul style={{ paddingLeft: 24 }}>
+-        <li>命盘信息仅用于本次解读与你账号下的历史命盘记录</li>
+-        <li>手机号用于注册、登录、订单通知</li>
+-        <li>反馈信息用于持续改进命理内容质量（脱敏后聚合分析）</li>
+-        <li>聚合数据可能用于行业研究与平台优化</li>
+-      </ul>
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>1. 排盘数据在浏览器内处理</h2>
++        <p>开源 Demo 的排盘由浏览器中的本地引擎完成。出生日期、时辰、性别与出生地经度不会由本项目上传到服务器，也不会建立用户账号或命盘历史数据库。</p>
+ 
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>3. 信息共享与第三方</h2>
+-      <p>除以下情形外，我们不会向第三方共享你的个人信息：</p>
+-      <ul style={{ paddingLeft: 24 }}>
+-        <li>支付服务商（支付宝 / 微信支付）：处理订单结算</li>
+-        <li>短信服务商（如阿里云短信）：发送验证码</li>
+-        <li>云服务商（如 Vercel / Cloudflare / 阿里云）：技术承载</li>
+-        <li>AI 解读服务（如 Anthropic Claude）：处理你的"自由追问"对话（已做匿名化）</li>
+-        <li>司法机关或政府部门基于法律法规的合法要求</li>
+-      </ul>
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>2. AI 解读由你选择的服务商处理</h2>
++        <p>当你主动配置 OpenAI 兼容接口并使用 AI 解读时，命盘摘要与对话内容会直接发送到你填写的第三方 AI 服务商。请在提交前阅读该服务商的隐私政策，并避免输入身份证号、联系方式、病历等不必要的敏感信息。</p>
++        <p>API 地址、模型名称与密钥只保存在当前标签页的 <code>sessionStorage</code> 中；关闭标签页后由浏览器清除。密钥不会写入本项目的源码、日志或静态资源。</p>
+ 
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>4. 信息安全</h2>
+-      <p>我们采取业界常见的技术与管理手段保护你的信息（HTTPS 传输加密、数据库加密存储、访问权限控制等）。但请注意，互联网传输无法保证 100% 安全。</p>
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>3. 本地存储</h2>
++        <p>站点仅使用浏览器本地存储保存亮暗主题偏好和当前会话的 AI 配置，不用于广告画像。你可以在浏览器设置中随时清除。</p>
+ 
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>5. 你的权利</h2>
+-      <ul style={{ paddingLeft: 24 }}>
+-        <li><strong>查询</strong>：可通过账号中心查看你的所有历史命盘与订单</li>
+-        <li><strong>删除</strong>：联系客服删除账号下指定命盘 / 注销账号</li>
+-        <li><strong>导出</strong>：可申请导出你的全部个人数据</li>
+-      </ul>
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>4. 托管与访问日志</h2>
++        <p>GitHub Pages、你自行部署的云平台或反向代理可能按照其自身政策记录 IP、浏览器类型、访问时间和错误日志。该处理不由本项目源码控制，请查看实际托管服务商的隐私政策。</p>
+ 
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>6. Cookie 与本地存储</h2>
+-      <p>本站使用 cookie / localStorage 用于：保存你的暗黑/亮色主题偏好、最近的命盘历史、会员登录状态。你可在浏览器设置中关闭，但部分功能可能受影响。</p>
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>5. 外部链接</h2>
++        <p>本项目可能链接到 GitHub、Bilibili 或其他第三方网站。离开本站后，第三方网站的数据处理适用其自己的隐私政策。</p>
+ 
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>7. 未成年人</h2>
+-      <p>本平台命理内容面向 18 岁以上成年用户。未成年人请在监护人同意下使用，并不得将解读用于重大人生决策。</p>
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>6. 未成年人</h2>
++        <p>命理内容仅供传统文化学习与自我反思。未成年人应在监护人指导下使用，不应将任何解读用于医疗、投资、法律或重大人生决策。</p>
+ 
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>8. 政策变更</h2>
+-      <p>本政策可能不定期更新。重大变更将以显著方式通知。继续使用即表示同意更新后的版本。</p>
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>7. 政策变更</h2>
++        <p>本说明会随功能变化更新，最新版本以仓库中本页源码为准。发现问题可通过 GitHub Issues 联系维护者。</p>
+ 
+         <p style={{ marginTop: 48, fontSize: 12, color: 'var(--tx-3)' }}>
+-          <a href="/terms" style={{ color: 'var(--ac)' }}>服务条款</a> · <a href="/" style={{ color: 'var(--ac)' }}>返回首页</a>
++          <Link href="/terms" style={{ color: 'var(--ac)' }}>使用条款</Link>
++          {' · '}
++          <Link href="/" style={{ color: 'var(--ac)' }}>返回首页</Link>
+         </p>
+       </main>
+     </>
+diff --git a/app/terms/page.tsx b/app/terms/page.tsx
+index e5e2bcc..e63d764 100644
+--- a/app/terms/page.tsx
++++ b/app/terms/page.tsx
+@@ -1,58 +1,55 @@
+-export const metadata = { title: '服务条款 · 紫微命盘', description: '紫微命盘服务条款与用户协议' };
++import Link from 'next/link';
++
++export const metadata = {
++  title: '使用条款 · 紫微命盘开源版',
++  description: '紫微斗数开源排盘 Demo 的使用条款',
++};
+ 
+ export default function TermsPage() {
+   return (
+     <>
+       <header style={{ position: 'sticky', top: 0, zIndex: 50, background: 'var(--bg-0)', borderBottom: '1px solid var(--bdr)', padding: '14px 24px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+-        <a href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--tx-3)', textDecoration: 'none' }}>
++        <Link href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--tx-3)', textDecoration: 'none' }}>
+           <span style={{ fontSize: '16px' }}>‹</span>
+           <span>返回首页</span>
+-        </a>
++        </Link>
+         <div style={{ width: '1px', height: '20px', background: 'var(--bdr-med)' }} />
+-        <span style={{ fontSize: '12px', color: 'var(--ac)', letterSpacing: '0.2em' }}>紫微命盘</span>
++        <span style={{ fontSize: '12px', color: 'var(--ac)', letterSpacing: '0.2em' }}>紫微命盘 · 开源版</span>
+       </header>
+       <main style={{ maxWidth: 800, margin: '0 auto', padding: '60px 24px 80px', color: 'var(--tx-1)', lineHeight: 1.8 }}>
+-        <h1 style={{ fontSize: 28, fontWeight: 600, marginBottom: 8 }}>服务条款</h1>
+-        <p style={{ fontSize: 12, color: 'var(--tx-3)', marginBottom: 32 }}>最后更新：2026年4月</p>
+-
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>1. 服务概述</h2>
+-      <p>紫微命盘（以下简称"本平台"）基于倪海厦《天纪》紫微斗数体系提供命盘排盘与解读服务。本平台所有命理内容仅供参考，<strong>不构成任何医疗、投资、法律、心理咨询或人生重大决策建议</strong>。</p>
+-
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>2. 用户行为规范</h2>
+-      <p>使用本平台即表示您同意：</p>
+-      <ul style={{ paddingLeft: 24 }}>
+-        <li>仅出于合法、个人参考目的使用本平台</li>
+-        <li>不传播本平台内容用于商业销售、转载或公开发布</li>
+-        <li>不进行扰乱平台正常运行的行为</li>
+-        <li>提交的出生信息真实有效；本平台对错误信息导致的解读偏差不承担责任</li>
+-      </ul>
+-
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>3. 知识产权与禁止条款 · 反爬反训练</h2>
+-      <p style={{ background: 'rgba(168,50,40,0.06)', border: '1px solid rgba(168,50,40,0.2)', padding: 16, borderRadius: 8 }}>
+-        <strong>本平台所有命理内容、知识库（含 14 主星 × 12 宫 × 男女 × 四化 × 大限流年的全部解读文本）、UI 设计、算法整合方案、案例库均为本平台原创或经合法整理。</strong><br/><br/>
+-        严格禁止以下行为，违者保留追究民事赔偿与刑事责任的权利：<br/>
+-        ① 通过爬虫、自动化脚本、批量调用 API 等任何技术手段抓取本平台内容；<br/>
+-        ② 将本平台生成的命盘解读、文本、API 响应数据**用于训练任何机器学习模型**（含但不限于大语言模型、命理生成模型、文本生成模型等）；<br/>
+-        ③ 将本平台生成的内容转售、发布到其他网站、APP、自媒体账号；<br/>
+-        ④ 反编译、复制、修改本平台前端或后端代码并以"自营"方式提供同类服务。<br/><br/>
+-        本平台输出文本嵌入有指纹追溯水印，违规复制 / 训练所产生的输出可被检测追溯。一经发现违规，本平台有权要求 <strong>每例违约赔偿 100 万元人民币</strong>，并保留向法院提起诉讼及配合公安机关调查的权利。
+-      </p>
+-
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>4. 免责声明</h2>
+-      <p>本平台命理内容基于传统紫微斗数与倪海厦体系的知识整理，<strong>不保证 100% 准确</strong>。命运受天、地、人三才共同影响，本平台输出仅作为认识自我的参考，使用者应理性看待，不应过度依赖任何单一命理判断。</p>
+-      <p>因使用本平台内容产生的任何后果（包括但不限于决策失误、心理影响、关系变化等），本平台不承担法律责任。</p>
+-
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>5. 服务变更与终止</h2>
+-      <p>本平台保留随时调整、暂停或终止部分或全部服务的权利。重大变更将以站内公告或邮件方式通知用户。</p>
+-
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>6. 法律适用与争议解决</h2>
+-      <p>本条款适用中华人民共和国法律。若发生争议，双方应友好协商；协商不成的，提交本平台运营主体所在地有管辖权的人民法院诉讼解决。</p>
+-
+-      <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>7. 联系方式</h2>
+-      <p>如有疑问，请通过本平台公布的客服微信 / 邮箱联系。</p>
++        <h1 style={{ fontSize: 28, fontWeight: 600, marginBottom: 8 }}>使用条款</h1>
++        <p style={{ fontSize: 12, color: 'var(--tx-3)', marginBottom: 32 }}>最后更新：2026年11月</p>
++
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>1. 服务说明</h2>
++        <p>本页运行的是紫微斗数开源排盘 Demo，基于传统紫微斗数与倪海厦《天纪》研究资料构建。排盘和页面展示属于技术演示，命理内容仅供传统文化学习与自我反思。</p>
++
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>2. 开源许可</h2>
++        <p>代码采用 MIT License，数据集采用 CC BY 4.0，古籍原文属于公有领域；倪师原话目录单独采用 CC BY-NC-SA 4.0。各部分的复制、修改、商用和再分发条件以仓库中的 <code>LICENSE</code>、<code>DATASET-LICENSE</code> 与对应目录许可文件为准。</p>
++
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>3. 使用规范</h2>
++        <ul style={{ paddingLeft: 24 }}>
++          <li>不得利用本项目从事违法活动、骚扰、欺诈或侵犯他人权益；</li>
++          <li>不得把命理结果冒充医学诊断、法律意见、投资承诺或确定性预测；</li>
++          <li>使用第三方 AI 服务时，应遵守该服务商条款并自行保护密钥与个人信息；</li>
++          <li>发布修改版时，应保留适用的开源许可与数据来源署名。</li>
++        </ul>
++
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>4. AI 输出</h2>
++        <p>AI 解读由用户自行选择并配置的第三方模型生成，可能存在遗漏、错误、偏见或幻觉。本项目不保证 AI 输出的准确性、完整性或适用性。涉及健康、财务、法律或重大人生决策时，请咨询具备资质的专业人士。</p>
++
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>5. 免责声明</h2>
++        <p>本项目按“现状”提供，不承诺服务不中断或排盘结果绝对无误。因使用或无法使用本项目产生的直接或间接损失，在适用法律允许的范围内由使用者自行承担。</p>
++
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>6. 服务变更</h2>
++        <p>维护者可以随时调整开源 Demo、接口兼容性、数据内容或部署方式。重要变化会尽量通过仓库提交记录与发布说明公开。</p>
++
++        <h2 style={{ fontSize: 18, marginTop: 32, marginBottom: 12 }}>7. 联系</h2>
++        <p>问题、纠错和版权说明请通过 GitHub 仓库 Issues 联系维护者，并附上可复现步骤与依据。</p>
+ 
+         <p style={{ marginTop: 48, fontSize: 12, color: 'var(--tx-3)' }}>
+-          <a href="/privacy" style={{ color: 'var(--ac)' }}>隐私政策</a> · <a href="/" style={{ color: 'var(--ac)' }}>返回首页</a>
++          <Link href="/privacy" style={{ color: 'var(--ac)' }}>隐私说明</Link>
++          {' · '}
++          <Link href="/" style={{ color: 'var(--ac)' }}>返回首页</Link>
+         </p>
+       </main>
+     </>
+diff --git a/components/InsightPanel.tsx b/components/InsightPanel.tsx
+index f405e25..4e528fc 100644
+--- a/components/InsightPanel.tsx
++++ b/components/InsightPanel.tsx
+@@ -203,7 +203,7 @@ export default function InsightPanel({ chart, selectedPalace, selectedSiHua }: I
+   const loadingRef = useRef(false);
+   const autoLoaded = useRef(false);
+   const aiConfigRef = useRef<BrowserAIConfig>(aiConfig);
+-  const pendingPrompt = useRef<string | null>(null);
++  const pendingRequest = useRef<Array<{ role: 'user' | 'assistant'; content: string }> | null>(null);
+   const lastPalaceBranch = useRef<number | undefined>(undefined);
+   const lastSiHuaKey = useRef<string | undefined>(undefined);
+   const scrollRef = useRef<HTMLDivElement>(null);
+@@ -220,21 +220,15 @@ export default function InsightPanel({ chart, selectedPalace, selectedSiHua }: I
+     }
+   }, [messages]);
+ 
+-  // Load the temporary browser-only AI configuration and generate the first
+-  // overview only when credentials are already available.
++  // Load any temporary browser-only AI configuration, then try the server API
++  // first. Static deployments fall back to the saved browser configuration.
+   useEffect(() => {
+     if (autoLoaded.current) return;
+     autoLoaded.current = true;
+     const loaded = loadBrowserAIConfig();
+     aiConfigRef.current = loaded;
+     setAiConfig(loaded);
+-
+-    if (loaded.apiKey) {
+-      sendMessage(TOPIC_PROMPTS.overview, true);
+-    } else {
+-      pendingPrompt.current = TOPIC_PROMPTS.overview;
+-      setConfigOpen(true);
+-    }
++    sendMessage(TOPIC_PROMPTS.overview, true);
+   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+ 
+   // Inject palace analysis when palace selected
+@@ -302,11 +296,15 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，
+   const streamResponse = async (apiMessages: { role: 'user' | 'assistant'; content: string }[]) => {
+     try {
+       let assistantText = '';
+-
+-      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
++      let assistantStarted = false;
+ 
+       const applyDelta = (delta: string) => {
+         assistantText += delta;
++        if (!assistantStarted) {
++          assistantStarted = true;
++          setMessages(prev => [...prev, { role: 'assistant', content: assistantText }]);
++          return;
++        }
+         setMessages(prev => {
+           const updated = [...prev];
+           updated[updated.length - 1] = { role: 'assistant', content: assistantText };
+@@ -334,6 +332,7 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，
+       if (useBrowserClient) {
+         const config = aiConfigRef.current;
+         if (!config.apiKey) {
++          pendingRequest.current = apiMessages;
+           setConfigOpen(true);
+           throw new Error('ai-config-required');
+         }
+@@ -357,12 +356,6 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，
+ 
+   const sendMessage = (text: string, hidden = false) => {
+     if (!text.trim() || loadingRef.current) return;
+-    if (!aiConfigRef.current.apiKey) {
+-      pendingPrompt.current = text;
+-      setConfigOpen(true);
+-      setConfigError('请先配置 AI 接口。密钥只保存在当前浏览器会话中。');
+-      return;
+-    }
+     loadingRef.current = true;
+     setLoading(true);
+ 
+@@ -395,9 +388,13 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，
+       setAiConfig(saved);
+       setConfigError('');
+       setConfigOpen(false);
+-      const prompt = pendingPrompt.current;
+-      pendingPrompt.current = null;
+-      if (prompt) sendMessage(prompt, true);
++      const request = pendingRequest.current;
++      pendingRequest.current = null;
++      if (request) {
++        loadingRef.current = true;
++        setLoading(true);
++        streamResponse(request);
++      }
+     } catch (error) {
+       setConfigError(error instanceof Error ? error.message : '配置无效');
+     }
