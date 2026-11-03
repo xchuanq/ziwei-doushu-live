@@ -24,14 +24,14 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Unpack, apply v3 overlay, test, and build
+      - name: Unpack overlays, test, and build
         run: |
           unzip -q ziwei-doushu-optimized.zip -d /tmp/ziwei-source
           cd /tmp/ziwei-source/ziwei-doushu-optimized
-          base64 -d "$GITHUB_WORKSPACE/ai-overlay-v2.b64" > /tmp/ai-overlay.zip
-          unzip -qo /tmp/ai-overlay.zip -d /tmp/ziwei-source/ziwei-doushu-optimized
-          git apply --check "$GITHUB_WORKSPACE/ziwei-ai-v3.patch"
-          git apply "$GITHUB_WORKSPACE/ziwei-ai-v3.patch"
+          base64 -d "$GITHUB_WORKSPACE/ai-overlay-v2.b64" > /tmp/ai-overlay-v2.zip
+          unzip -qo /tmp/ai-overlay-v2.zip -d /tmp/ziwei-source/ziwei-doushu-optimized
+          base64 -d "$GITHUB_WORKSPACE/ai-overlay-v3.b64" > /tmp/ai-overlay-v3.zip
+          unzip -qo /tmp/ai-overlay-v3.zip -d /tmp/ziwei-source/ziwei-doushu-optimized
           printf '\nexport const dynamic = "force-static";\n' >> app/robots.ts
           printf '\nexport const dynamic = "force-static";\n' >> app/sitemap.ts
           git init -q
